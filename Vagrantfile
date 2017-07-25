@@ -1,3 +1,6 @@
+
+ENV['VAGRANT_DEFAULT_PROVIDER'] = 'virtualbox'
+
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 
