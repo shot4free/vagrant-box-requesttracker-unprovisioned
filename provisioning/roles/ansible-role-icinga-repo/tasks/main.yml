@@ -1,0 +1,13 @@
+---
+# tasks file for installing icinga2-repo
+
+- name: "enable icinga2 repo"
+  yum_repository:
+    name: icinga2-repo
+    description: icinga2 repo
+    baseurl: http://packages.icinga.org/epel/$releasever/release/
+    gpgkey: file:///etc/pki/rpm-gpg/RPM-GPG-KEY-ICINGA
+    gpgcheck: no
+    enabled: yes
+    state: present
+

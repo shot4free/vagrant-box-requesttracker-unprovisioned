@@ -1,0 +1,171 @@
+---
+- name: Ensure base packages are installed
+  package: name={{item}} state=installed
+  with_items:
+    - php-pdo
+    - php-ldap
+    - php-ZendFramework-Db-Adapter-Pdo
+    - php-ZendFramework-Db-Adapter-Pdo-Mysql
+    - nagios-plugins-all
+    - perl-LWP-Protocol-https
+    - perl-Crypt-SSLeay
+    - perl-Time-HiRes
+    - perl-libwww-perl
+    - wget
+    - bc
+    - java-1.8.0-openjdk
+
+- name: Install Icinga2 IDO modules on RedHat OS family
+  yum: name=icinga2-ido-mysql
+       state=latest
+  when: ansible_pkg_mgr == "yum"
+
+- name: Install Icinga2 IDO modules on RedHat OS family (Fedora > 22)
+  dnf: name=icinga2-ido-mysql
+       state=latest
+  when: ansible_pkg_mgr == "dnf"
+
+- name: Create a IDO Database for Icinga2
+  mysql_db: name={{ icinga2_db }}
+            state=present
+  register: icinga_ido_db
+
+- name: Create Icinga2 IDO Database User and configure Grants
+  mysql_user: name={{ icinga2_db_user }}
+              password={{ icinga2_db_pass }}
+              state=present
+              priv="{{ icinga2_db }}.*:GRANT,INSERT,SELECT,UPDATE,DELETE,DROP,CREATE VIEW,INDEX,EXECUTE"
+
+- name: Import the IDO Schema on Icinga Web Database (only once)
+  mysql_db: name={{ icinga2_db }}
+            state=import
+            target={{ icinga2_web_mysql_schema_rh }}
+  when: icinga_ido_db.changed == true
+
+- name: Configure Icinga2 Ido Mysql Feature
+  template: src=ido-mysql.conf.j2
+            dest={{ icinga2_ido_mysql_conf }}
+            backup=yes
+            owner=icinga
+            group=icinga
+            mode=0640
+
+- name: Enable Icinga2 Ido Mysql Feature
+  command: "icinga2 feature enable ido-mysql"
+  register: features_result
+  changed_when: "'for these changes to take effect' in features_result.stdout"
+  notify:
+   - restart icinga2
+
+- name: Enable Icinga2 Command Feature
+  command: "icinga2 feature enable command"
+  register: features_result
+  changed_when: "'for these changes to take effect' in features_result.stdout"
+  notify:
+   - restart icinga2
+
+- name: Install Icinga Web2 on RedHat OS family
+  yum: name={{ item.package }}
+       state=latest
+       enablerepo={{ enablerepo }}
+  with_items: "{{ icinga2_web2_ui_rpm }}"
+  tags: icinga2-ansible-web2-ui-install
+  when: ansible_pkg_mgr == "yum"
+
+- name: Install Icinga Web2 on RedHat OS family
+  dnf: name={{ item.package }}
+       state=latest
+       enablerepo={{ enablerepo }}
+  with_items: "{{ icinga2_web2_ui_rpm }}"
+  tags: icinga2-ansible-web2-ui-install
+  when: ansible_pkg_mgr == "dnf"
+
+- name: Create a Web Database for Icinga2
+  mysql_db: name={{ icinga2_web2_db }}
+            state=present
+  register: icinga_web_db
+
+- name: Create Icinga2 Web Database User and configure Grants
+  mysql_user: name={{ icinga2_web2_db_user }}
+              password={{ icinga2_web2_db_pass }}
+              state=present
+              priv="{{ icinga2_web2_db }}.*:GRANT,INSERT,SELECT,UPDATE,DELETE,DROP,CREATE VIEW,INDEX,EXECUTE"
+
+- name: Import the Web Schema on Icinga Web Database (only once)
+  mysql_db: name={{ icinga2_web2_db }}
+            state=import
+            target={{ icinga2_web2_mysql_schema_rh }}
+  when: icinga_web_db.changed == true
+
+- name: Define web server daemon package.
+  set_fact:
+    web_server_daemon: "{{ __web_server_daemon_rh }}"
+  when: web_server_daemon is not defined
+
+#- name: Delete artifacts
+#  command: mv /etc/icinga2/features-enabled/ido-mysql.conf /tmp
+
+- name: Configure date in php.ini
+  lineinfile:
+    dest: /etc/php.ini
+    line: 'date.timezone = Europe/Warsaw'
+    insertafter: ';date.timezone ='
+
+- name: "Copy plugin to client"
+  template: >
+    src=check_apache2_advanced.sh.j2
+    dest=/usr/lib64/nagios/plugins/check_apache2_advanced.sh
+    owner=root
+    group=root
+    mode=0755
+
+- name: "Add check_apache command to commands.conf"
+  blockinfile:
+    path: /etc/icinga2/conf.d/commands.conf
+    block: |
+      object CheckCommand "check_apache2" {  
+         import "plugin-check-command"
+         command = [  PluginDir + "/check_apache2_advanced.sh"  ]
+      }
+
+
+- name: "Add check_apache2 service to services.conf"
+  blockinfile:
+    path: /etc/icinga2/conf.d/services.conf
+    block: |
+      apply Service "check_apache2" {   
+            import "generic-service"
+            check_command = "check_apache2"
+            assign where host.name == NodeName
+      }
+
+
+- name: "Add hostname to /etc/hosts"
+  blockinfile:
+    path: /etc/hosts
+    block: |
+      127.0.0.1 centos7
+
+
+- name: "Restart {{ web_server_daemon }} and Icinga2 to Apply the Configuration"
+  service: name={{ item }}
+           state=restarted
+           enabled=yes
+  with_items:
+    - "{{ web_server_daemon }}"
+    - icinga2
+
+- name: "Configure monitoring on 443 port"
+  lineinfile:
+    dest: /etc/httpd/conf.d/ssl.conf
+    line: 'DocumentRoot "/usr/share/icingaweb2/public"'
+    insertafter: '# General setup for the virtual host, inherited from global configuration'
+
+- name: "generate setup key"
+  command: icingacli setup token create
+  register: key
+
+- name: "Icinga Web2 Installation finished (RH)"
+  debug:
+    msg: "Now go at http://IP//icingaweb2/setup to continue the installation. Enter token for setup.\n {{ key }}."
+  tags: icinga2-ansible-web2-ui-install

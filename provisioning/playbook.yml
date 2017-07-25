@@ -1,0 +1,14 @@
+---
+- hosts: all
+  become: yes
+  become_user: root
+
+  roles:
+     - ansible-role-repo-epel
+     - ansible-role-icinga-repo
+     - ansible-role-mysql
+     - ansible-role-apache
+     - icinga2-ansible-web2-ui
+     - ansible-deploy-small-app
+
+

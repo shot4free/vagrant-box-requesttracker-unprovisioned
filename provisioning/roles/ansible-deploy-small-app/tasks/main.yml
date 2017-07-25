@@ -1,0 +1,40 @@
+---
+# tasks file for ansible-deploy-small-app
+
+- name: "Copy jar file to server" 
+  copy:
+    src: requesttracker-1.0-SNAPSHOT.jar
+    dest: /usr/bin/requesttracker.jar
+    owner: root
+    group: root
+    mode: 0755
+    backup: yes
+
+- name: "Configure requesttracker to run on boot."
+  lineinfile:
+    dest: "/etc/rc.d/rc.local"
+    line: "( ( nohup java -jar /usr/bin/requesttracker.jar 1>/dev/null 2>&1 ) & )"
+    state: present
+
+- name: "Change permissions on /etc/rc.d/rc.local"
+  file:
+    path: /etc/rc.d/rc.local
+    owner: root
+    group: root
+    mode: 0755
+
+- name: "Run requesttracker now" 
+#  shell: nohup java -jar /usr/bin/requesttracker.jar 
+  shell: ( ( nohup java -jar /usr/bin/requesttracker.jar 1>/dev/null 2>&1 ) & )
+- name: "Modify apache setting"
+  copy:
+    src: vhosts.conf
+    dest: /etc/httpd/conf.d/vhosts.conf
+    owner: root
+    group: root
+    mode: 0640
+    backup: yes
+  notify:
+    - restart httpd
+
+
